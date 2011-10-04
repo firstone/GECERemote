@@ -42,7 +42,7 @@ const uint8_t TRACK_COUNT = 1;
 const uint8_t TRACK = 5;
 const uint8_t LIGHT_COUNT = 50;
 const uint8_t MAX_BRIGHTNESS = 0xCC;
-const uint8_t BUF_SIZE = 40;
+const uint8_t BUF_SIZE = 41;
 
 const byte MAC[] = { 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
 const byte IP[] = { 192,168,0,100 };
@@ -68,7 +68,7 @@ void setup() {
   
   Ethernet.begin(const_cast<byte *>(MAC), const_cast<byte *>(IP));
   Udp.begin(LOCAL_PORT);
-
+    
 }
   
 void loop() {
@@ -79,9 +79,11 @@ void loop() {
 
     uint8_t lightCount = buf[0];
     
-    if (lightCount > 0 && lightCount <= 8 && (lightCount << 2) <= len - 1) {
-      for (int i = 0; i < lightCount; ++i)
-        lights[i].setData(buf + (i << 2) + 1);
+    if (lightCount > 0 && lightCount <= 8 && lightCount * 5 <= len - 1) {
+      for (int i = 0; i < lightCount; ++i) {
+        int index = i * 5;
+        lights[i].setTrack(buf[index + 1]).setData(buf + index + 2);
+      }
 
       uint8_t port = Writer::getPort(lights[0].getTrack()) - 1;
       
