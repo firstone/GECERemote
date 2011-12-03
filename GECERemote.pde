@@ -29,23 +29,33 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *  
  *********************************************************************/
-#include <CppDefs.h>
 #include <Ethernet.h>
-#include <Light.h>
 #include <SPI.h>
-#include <Writer.h>
 #include <Udp.h>
+
+//GECEWriter
+#include <CppDefs.h>
+#include <AnimationExecutor.h>
+#include <ColorCycle.h>
+#include <ColorCycleAnimator.h>
+#include <Light.h>
+#include <StaticColorAnimator.h>
+#include <StepAnimator.h>
+#include <SyncAnimator.h>
+#include <Writer.h>
 
 using namespace ESoft::GECEWriter;
 
-const uint8_t TRACK_COUNT = 1;
-const uint8_t TRACK = 5;
+const uint8_t TRACK_COUNT = 4;
+const uint8_t TRACKS[] = { 5, 6, 14, 15 };
 const uint8_t LIGHT_COUNT = 50;
 const uint8_t MAX_BRIGHTNESS = 0xCC;
-const uint8_t BUF_SIZE = 41;
+const uint8_t LIGHT_BYTES_COUNT = 5; // track + 4 bytes data
+const uint8_t BUF_SIZE = Writer::PORT_COUNT * (1 + LIGHT_BYTES_COUNT * Writer::PORT_PIN_COUNT);
+const unsigned long INIT_DELAY = 5 * 1000; //ms
 
 const byte MAC[] = { 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
-const byte IP[] = { 192,168,0,100 };
+const byte IP[] = { 192,168,1,111 };
 const unsigned int LOCAL_PORT = 9900;
 
 uint8_t buf[BUF_SIZE];
@@ -56,39 +66,90 @@ Light lights[8];
 
 Writer *writers[Writer::PORT_COUNT];
 
-void setup() { 
-  Writer::initialize(TRACK, LIGHT_COUNT, MAX_BRIGHTNESS, true);
+void initLights() {
+
+  Writer::initialize(TRACKS[1], LIGHT_COUNT, MAX_BRIGHTNESS, true, true); // reverse track 6 addressing
+  Writer::initialize(TRACKS[3], LIGHT_COUNT, MAX_BRIGHTNESS, true, false, 48); // excluded defective light 48 on track 15
+  
+  for (int i = 0; i < TRACK_COUNT; i++)
+      Writer::initialize(TRACKS[i], LIGHT_COUNT, MAX_BRIGHTNESS, true);
 
   for (int i = 0; i < Writer::PORT_COUNT; i++)
     writers[i] = NULL;
     
-  uint8_t lines[] = { TRACK };
+  uint8_t lines[Writer::PORT_PIN_COUNT];
   
-  writers[Writer::getPort(TRACK) - 1] = new Writer(1, lines);
+  for (int i = 0; i < Writer::PORT_COUNT; i++) {
+    int lineCount = 0;
+    for (int j = 0; j < TRACK_COUNT; j++)
+      if (Writer::getPort(TRACKS[j]) - 1 == i)
+        lines[lineCount++] = TRACKS[j];
+        
+      if (lineCount > 0)
+        writers[i] = new Writer(lineCount, lines);
+  }
+  
+}
+
+void idleLights() {
+
+    Color roofColor[] = { Color::BLUE, Color::WHITE };
+  
+    SyncAnimator roof(TRACKS[0], LIGHT_COUNT, new ColorCycleAnimator(ColorCycle(2, roofColor), MAX_BRIGHTNESS, 1));
+    
+    StepAnimator tree1(TRACKS[1], LIGHT_COUNT, new StaticColorAnimator(MAX_BRIGHTNESS, Color::GREEN));
+    StepAnimator tree2(TRACKS[2], LIGHT_COUNT, new StaticColorAnimator(MAX_BRIGHTNESS, Color::GREEN));
+    
+    StepAnimator door(TRACKS[7], LIGHT_COUNT, new StaticColorAnimator(MAX_BRIGHTNESS, Color::RED));
+    
+    TrackAnimator *list[] = { &roof, &tree1, &tree2, &door };
+    AnimationExecutor exec(TRACK_COUNT, list);
+    exec.animate();
+    
+}
+
+void setup() {
+
+  delay(INIT_DELAY);
+  
+  initLights();
+  
+  idleLights();
   
   Ethernet.begin(const_cast<byte *>(MAC), const_cast<byte *>(IP));
   Udp.begin(LOCAL_PORT);
     
 }
-  
+
 void loop() {
   
   if (Udp.available()) {
     
     int len = Udp.readPacket(buf, BUF_SIZE);
 
-    uint8_t lightCount = buf[0];
+    int pos = 0; 
+    boolean done = false;
     
-    if (lightCount > 0 && lightCount <= 8 && lightCount * 5 <= len - 1) {
-      for (int i = 0; i < lightCount; ++i) {
-        int index = i * 5;
-        lights[i].setTrack(buf[index + 1]).setData(buf + index + 2);
-      }
-
-      uint8_t port = Writer::getPort(lights[0].getTrack()) - 1;
+    while (!done && pos < len) {
       
-      if (writers[port] != NULL)
-        writers[port]->write(lightCount, lights);
+      uint8_t lightCount = buf[pos++];
+
+      if (lightCount == 0xFF) 
+        idleLights();    
+      if (lightCount > 0 && lightCount <= Writer::PORT_PIN_COUNT && lightCount * LIGHT_BYTES_COUNT + pos <= len) {
+        for (int i = 0; i < lightCount; ++i) {
+          int index = pos + (i * LIGHT_BYTES_COUNT);
+          lights[i].setTrack(buf[index]).setData(buf + index + 1);
+        }
+
+        pos += lightCount * LIGHT_BYTES_COUNT;
+        
+        uint8_t port = Writer::getPort(lights[0].getTrack()) - 1;
+
+        if (writers[port] != NULL)
+          writers[port]->write(lightCount, lights);
+      } else 
+        done = true;
     }
 
   }
