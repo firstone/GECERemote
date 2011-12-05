@@ -55,7 +55,7 @@ const uint8_t BUF_SIZE = Writer::PORT_COUNT * (1 + LIGHT_BYTES_COUNT * Writer::P
 const unsigned long INIT_DELAY = 5 * 1000; //ms
 
 const byte MAC[] = { 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
-const byte IP[] = { 192,168,1,111 };
+const byte IP[] = { 192,168,1,112 };
 const unsigned int LOCAL_PORT = 9900;
 
 uint8_t buf[BUF_SIZE];
